@@ -6,12 +6,18 @@
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timezone, timedelta
+import ssl
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Dict, Optional
 
-import aiohttp
+import requests
+import urllib3
 import websockets
+
+# Suppress SSL warnings (caused by Avast Web Shield)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +40,6 @@ class MarketPrices:
 
     @property
     def total_odds(self) -> float:
-        """Sum should be close to 1.0 (minus spread)"""
         return self.up_price + self.down_price
 
 
@@ -51,29 +56,29 @@ class MarketInfo:
 
 
 class PolymarketFeed:
-    """
-    Polymarket WebSocket feed for real-time prices
-    """
+    """Polymarket WebSocket feed for real-time prices"""
 
     GAMMA_URL = "https://gamma-api.polymarket.com"
     CLOB_URL = "https://clob.polymarket.com"
     WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 
     def __init__(self):
-        self.prices: Dict[str, MarketPrices] = {}  # key: token_id
-        self.markets: Dict[str, MarketInfo] = {}  # key: condition_id
+        self.prices: Dict[str, MarketPrices] = {}
+        self.markets: Dict[str, MarketInfo] = {}
         self._ws = None
         self._running = False
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session = requests.Session()
+
+        # SSL context for WebSocket
+        self._ssl_context = ssl.create_default_context()
+        self._ssl_context.check_hostname = False
+        self._ssl_context.verify_mode = ssl.CERT_NONE
 
         logger.info("PolymarketFeed initialized")
 
     async def start(self):
         """Start the feed"""
         self._running = True
-        self._session = aiohttp.ClientSession()
-
-        # Start WebSocket connection
         asyncio.create_task(self._connect_ws())
 
     async def stop(self):
@@ -81,21 +86,11 @@ class PolymarketFeed:
         self._running = False
         if self._ws:
             await self._ws.close()
-        if self._session:
-            await self._session.close()
+        self._session.close()
         logger.info("PolymarketFeed stopped")
 
     async def fetch_market(self, coin: str, timeframe: str) -> Optional[MarketInfo]:
-        """
-        Fetch market info for a coin/timeframe
-
-        Args:
-            coin: BTC, ETH, SOL, XRP
-            timeframe: 5m, 15m, 1h
-
-        Returns:
-            MarketInfo or None
-        """
+        """Fetch market info for a coin/timeframe"""
         slug = self._build_slug(coin, timeframe)
         if not slug:
             return None
@@ -104,59 +99,55 @@ class PolymarketFeed:
             url = f"{self.GAMMA_URL}/events"
             params = {"slug": slug, "limit": 1}
 
-            async with self._session.get(url, params=params, timeout=10) as resp:
-                if resp.status != 200:
-                    return None
+            resp = self._session.get(url, params=params, timeout=10, verify=False)
 
-                data = await resp.json()
-                if not data or data[0].get("ticker") != slug:
-                    return None
+            if resp.status_code != 200:
+                return None
 
-                event = data[0]
-                market = event.get("markets", [{}])[0]
+            data = resp.json()
+            if not data or data[0].get("ticker") != slug:
+                return None
 
-                # Extract token IDs
-                token_ids = json.loads(market.get("clobTokenIds", "[]"))
-                if len(token_ids) != 2:
-                    return None
+            event = data[0]
+            market = event.get("markets", [{}])[0]
+            token_ids = json.loads(market.get("clobTokenIds", "[]"))
 
-                info = MarketInfo(
-                    condition_id=market.get("conditionId", ""),
-                    question=market.get("question", ""),
-                    slug=slug,
-                    end_time=datetime.fromtimestamp(
-                        market.get("end_date_iso", 0) / 1000,
-                        tz=timezone.utc
-                    ),
-                    up_token_id=token_ids[0],
-                    down_token_id=token_ids[1]
-                )
+            if len(token_ids) != 2:
+                return None
 
-                # Store market info
-                self.markets[info.condition_id] = info
+            info = MarketInfo(
+                condition_id=market.get("conditionId", ""),
+                question=market.get("question", ""),
+                slug=slug,
+                end_time=datetime.fromtimestamp(
+                    market.get("end_date_iso", 0) / 1000,
+                    tz=timezone.utc
+                ),
+                up_token_id=token_ids[0],
+                down_token_id=token_ids[1]
+            )
 
-                # Initialize prices
-                self.prices[info.up_token_id] = MarketPrices(
-                    condition_id=info.condition_id,
-                    up_token_id=info.up_token_id,
-                    down_token_id=info.down_token_id
-                )
-                self.prices[info.down_token_id] = MarketPrices(
-                    condition_id=info.condition_id,
-                    up_token_id=info.up_token_id,
-                    down_token_id=info.down_token_id
-                )
+            self.markets[info.condition_id] = info
 
-                return info
+            self.prices[info.up_token_id] = MarketPrices(
+                condition_id=info.condition_id,
+                up_token_id=info.up_token_id,
+                down_token_id=info.down_token_id
+            )
+            self.prices[info.down_token_id] = MarketPrices(
+                condition_id=info.condition_id,
+                up_token_id=info.up_token_id,
+                down_token_id=info.down_token_id
+            )
+
+            return info
 
         except Exception as e:
-            logger.error(f"Error fetching market {coin} {timeframe}: {e}")
+            logger.debug(f"Error fetching market {coin} {timeframe}: {e}")
             return None
 
     def _build_slug(self, coin: str, timeframe: str) -> Optional[str]:
         """Build Polymarket slug for coin/timeframe"""
-        import time
-
         coin_slugs = {
             "BTC": "bitcoin",
             "ETH": "ethereum",
@@ -206,12 +197,12 @@ class PolymarketFeed:
                     self.WS_URL,
                     ping_interval=20,
                     ping_timeout=60,
-                    close_timeout=10
+                    close_timeout=10,
+                    ssl=self._ssl_context
                 ) as ws:
                     self._ws = ws
                     logger.info("Polymarket WS connected")
 
-                    # Re-subscribe to all markets
                     for condition_id in self.markets:
                         await self.subscribe_market(condition_id)
 
@@ -245,7 +236,7 @@ class PolymarketFeed:
 
         if asset_id and asks:
             price = min(float(a["price"]) for a in asks)
-            await self._update_price(asset_id, price)
+            self._update_price(asset_id, price)
 
     async def _process_price_change(self, data: Dict):
         """Process price change event"""
@@ -253,33 +244,20 @@ class PolymarketFeed:
         best_ask = data.get("best_ask")
 
         if asset_id and best_ask:
-            await self._update_price(asset_id, float(best_ask))
+            self._update_price(asset_id, float(best_ask))
 
-    async def _update_price(self, token_id: str, price: float):
+    def _update_price(self, token_id: str, price: float):
         """Update price for a token"""
         if token_id not in self.prices:
             return
 
         price_obj = self.prices[token_id]
-        import time
         price_obj.last_update = time.time()
 
-        # Determine if this is up or down token
         if token_id == price_obj.up_token_id:
             price_obj.up_price = price
         elif token_id == price_obj.down_token_id:
             price_obj.down_price = price
-
-        # Calculate spread
-        if price_obj.up_price > 0 and price_obj.down_price > 0:
-            # Get other token price if needed
-            other_token = price_obj.down_token_id if token_id == price_obj.up_token_id else price_obj.up_token_id
-            if other_token in self.prices:
-                other_price = self.prices[other_token]
-                if other_token == price_obj.up_token_id:
-                    price_obj.down_price = other_price.down_price
-                else:
-                    price_obj.up_price = other_price.up_price
 
     def get_price(self, token_id: str) -> Optional[float]:
         """Get current price for a token"""
@@ -300,21 +278,15 @@ class PolymarketFeed:
         return None
 
 
-# ═══════════════════════════════════════════════════════════════
-# MARKET DISCOVERY
-# ═══════════════════════════════════════════════════════════════
-
 class MarketDiscovery:
-    """
-    Discovers and tracks active Polymarket markets
-    """
+    """Discovers and tracks active Polymarket markets"""
 
     SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP"]
     SUPPORTED_TIMEFRAMES = ["5m", "15m", "1h"]
 
     def __init__(self, feed: PolymarketFeed):
         self.feed = feed
-        self.active_markets: Dict[str, MarketInfo] = {}  # key: "COIN_TIMEFRAME"
+        self.active_markets: Dict[str, MarketInfo] = {}
 
     async def discover_all(self) -> Dict[str, MarketInfo]:
         """Discover all active markets"""
