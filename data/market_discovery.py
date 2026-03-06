@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 import requests
 import urllib3
 
-# Suppress SSL warnings (caused by Avast Web Shield)
+# Suppress SSL warnings (caused by Windows schannel certificate revocation check)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
@@ -47,10 +47,10 @@ class MarketDiscovery:
     GAMMA_URL = "https://gamma-api.polymarket.com"
 
     COIN_SLUGS = {
-        "BTC": "bitcoin",
-        "ETH": "ethereum",
-        "SOL": "solana",
-        "XRP": "ripple-xrp"
+        "BTC": "btc",
+        "ETH": "eth",
+        "SOL": "sol",
+        "XRP": "xrp"
     }
 
     SUPPORTED_COINS = ["BTC", "ETH", "SOL", "XRP"]
@@ -58,11 +58,13 @@ class MarketDiscovery:
 
     def __init__(self):
         self.markets: Dict[str, Market] = {}
+        # Create session with SSL verification disabled
         self._session = requests.Session()
+        self._session.verify = False
 
     async def start(self):
         """Initialize"""
-        pass
+        logger.info("MarketDiscovery initialized (SSL verification disabled)")
 
     async def stop(self):
         """Cleanup"""
@@ -98,7 +100,7 @@ class MarketDiscovery:
             url = f"{self.GAMMA_URL}/events"
             params = {"slug": slug, "limit": 1}
 
-            resp = self._session.get(url, params=params, timeout=10, verify=False)
+            resp = self._session.get(url, params=params, timeout=15)
 
             if resp.status_code != 200:
                 logger.debug(f"Market not found: {slug} (HTTP {resp.status_code})")
@@ -135,7 +137,7 @@ class MarketDiscovery:
             )
 
             self.markets[market.key] = market
-            logger.info(f"Found market: {market.key} -> {slug}")
+            logger.info(f"Found market: {market.key}")
             return market
 
         except Exception as e:

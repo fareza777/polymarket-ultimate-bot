@@ -16,7 +16,7 @@ import requests
 import urllib3
 import websockets
 
-# Suppress SSL warnings (caused by Avast Web Shield)
+# Suppress SSL warnings (caused by Avast Web Shield / Windows schannel)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
@@ -67,14 +67,19 @@ class PolymarketFeed:
         self.markets: Dict[str, MarketInfo] = {}
         self._ws = None
         self._running = False
-        self._session = requests.Session()
 
-        # SSL context for WebSocket
+        # Create session with SSL verification disabled
+        self._session = requests.Session()
+        self._session.verify = False  # Disable SSL verification for all requests
+
+        # SSL context for WebSocket (skip certificate revocation check)
         self._ssl_context = ssl.create_default_context()
         self._ssl_context.check_hostname = False
         self._ssl_context.verify_mode = ssl.CERT_NONE
+        # Disable certificate revocation check (Windows schannel issue)
+        self._ssl_context.options |= ssl.OP_NO_SSLv2 | ssl.OP_NO_SSLv3
 
-        logger.info("PolymarketFeed initialized")
+        logger.info("PolymarketFeed initialized (SSL verification disabled)")
 
     async def start(self):
         """Start the feed"""
@@ -99,13 +104,16 @@ class PolymarketFeed:
             url = f"{self.GAMMA_URL}/events"
             params = {"slug": slug, "limit": 1}
 
-            resp = self._session.get(url, params=params, timeout=10, verify=False)
+            # Use session with verify=False already set
+            resp = self._session.get(url, params=params, timeout=15)
 
             if resp.status_code != 200:
+                logger.debug(f"Polymarket HTTP {resp.status_code} for {slug}")
                 return None
 
             data = resp.json()
             if not data or data[0].get("ticker") != slug:
+                logger.debug(f"Slug mismatch or empty: {slug}")
                 return None
 
             event = data[0]
@@ -113,6 +121,7 @@ class PolymarketFeed:
             token_ids = json.loads(market.get("clobTokenIds", "[]"))
 
             if len(token_ids) != 2:
+                logger.warning(f"Invalid token IDs for {slug}")
                 return None
 
             info = MarketInfo(
@@ -140,19 +149,20 @@ class PolymarketFeed:
                 down_token_id=info.down_token_id
             )
 
+            logger.info(f"Found Polymarket: {coin} {timeframe}")
             return info
 
         except Exception as e:
-            logger.debug(f"Error fetching market {coin} {timeframe}: {e}")
+            logger.error(f"Error fetching Polymarket {coin} {timeframe}: {e}")
             return None
 
     def _build_slug(self, coin: str, timeframe: str) -> Optional[str]:
         """Build Polymarket slug for coin/timeframe"""
         coin_slugs = {
-            "BTC": "bitcoin",
-            "ETH": "ethereum",
-            "SOL": "solana",
-            "XRP": "ripple-xrp"
+            "BTC": "btc",
+            "ETH": "eth",
+            "SOL": "sol",
+            "XRP": "xrp"
         }
 
         coin_slug = coin_slugs.get(coin.upper())
