@@ -12,6 +12,11 @@ aiohttp>=3.9.0
 numpy>=1.26.0
 pandas>=2.1.0
 
+# Web Dashboard
+flask>=3.0.0
+flask-socketio>=5.3.0
+flask-cors>=4.0.0
+
 # Execution (optional - for live trading)
 # py_clob_client>=0.1.0
 # eth-account>=0.10.0
