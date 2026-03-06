@@ -30,11 +30,12 @@ def setup_logger(
     Returns:
         Configured logger
     """
-    logger = logging.getLogger(name)
-    logger.setLevel(getattr(logging, level.upper()))
+    # Configure root logger to capture all module logs
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level.upper()))
 
     # Clear existing handlers
-    logger.handlers.clear()
+    root_logger.handlers.clear()
 
     # Console handler
     if rich_console:
@@ -54,7 +55,7 @@ def setup_logger(
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter("%(message)s")
         handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        root_logger.addHandler(handler)
     else:
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.DEBUG)
@@ -62,7 +63,7 @@ def setup_logger(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        root_logger.addHandler(handler)
 
     # File handler
     if log_file:
@@ -75,8 +76,10 @@ def setup_logger(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
+        root_logger.addHandler(file_handler)
 
+    # Return the named logger
+    logger = logging.getLogger(name)
     return logger
 
 

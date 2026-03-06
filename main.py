@@ -147,9 +147,17 @@ class PolymarketUltimateBot:
         markets = await self.market_discovery.discover_all()
         logger.info(f"Found {len(markets)} active markets")
 
-        # Subscribe to markets
-        for market in markets.values():
-            await self.polymarket_feed.subscribe_market(market.condition_id)
+        # Register markets with Polymarket feed
+        for key, market in markets.items():
+            self.polymarket_feed.register_market(
+                condition_id=market.condition_id,
+                up_token_id=market.up_token_id,
+                down_token_id=market.down_token_id,
+                slug=market.slug
+            )
+
+        # Now connect WebSocket with registered markets
+        await self.polymarket_feed.connect_ws()
 
         # Sentiment feed
         self.sentiment_feed = SentimentFeed()
@@ -240,10 +248,14 @@ class PolymarketUltimateBot:
         """Main trading loop"""
         logger.info("[LOOP] Starting trading loop...")
 
-        # Start Binance feeds
+        # Give Polymarket WS time to establish connection first
+        logger.info("Waiting for Polymarket WS to connect...")
+        await asyncio.sleep(3)
+
+        # Start Binance feeds with timeout protection
         feed_tasks = []
         for key, feed in self.binance_feeds.items():
-            task = asyncio.create_task(feed.start())
+            task = asyncio.create_task(self._safe_start_feed(feed, key))
             feed_tasks.append(task)
 
         # Start dashboard refresh
@@ -261,6 +273,15 @@ class PolymarketUltimateBot:
             except Exception as e:
                 logger.error(f"Error in trading loop: {e}")
                 await asyncio.sleep(5)
+
+    async def _safe_start_feed(self, feed, key: str):
+        """Start a feed with error handling"""
+        try:
+            await asyncio.wait_for(feed.start(), timeout=30)
+        except asyncio.TimeoutError:
+            logger.warning(f"Feed {key} startup timed out (likely geo-blocked)")
+        except Exception as e:
+            logger.warning(f"Feed {key} error: {e}")
 
     async def _process_market(self, key: str):
         """Process a single market"""

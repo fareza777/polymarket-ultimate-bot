@@ -67,6 +67,7 @@ class PolymarketFeed:
         self.markets: Dict[str, MarketInfo] = {}
         self._ws = None
         self._running = False
+        self._ws_task = None  # Track WS task
 
         # Create session with SSL verification disabled
         self._session = requests.Session()
@@ -84,7 +85,7 @@ class PolymarketFeed:
     async def start(self):
         """Start the feed"""
         self._running = True
-        asyncio.create_task(self._connect_ws())
+        # Don't start WS yet - wait for markets to be registered
 
     async def stop(self):
         """Stop the feed"""
@@ -93,6 +94,43 @@ class PolymarketFeed:
             await self._ws.close()
         self._session.close()
         logger.info("PolymarketFeed stopped")
+
+    def register_market(self, condition_id: str, up_token_id: str, down_token_id: str, slug: str = ""):
+        """Register a market for subscription"""
+        # Store market info
+        info = MarketInfo(
+            condition_id=condition_id,
+            question=slug,
+            slug=slug,
+            end_time=datetime.now(tz=timezone.utc),
+            up_token_id=up_token_id,
+            down_token_id=down_token_id
+        )
+        self.markets[condition_id] = info
+
+        # Initialize price objects
+        self.prices[up_token_id] = MarketPrices(
+            condition_id=condition_id,
+            up_token_id=up_token_id,
+            down_token_id=down_token_id
+        )
+        self.prices[down_token_id] = MarketPrices(
+            condition_id=condition_id,
+            up_token_id=up_token_id,
+            down_token_id=down_token_id
+        )
+        logger.debug(f"Registered market: {slug}")
+
+    async def connect_ws(self):
+        """Connect WebSocket after markets are registered"""
+        if not self.markets:
+            logger.warning("No markets registered, skipping WS connection")
+            return
+
+        logger.info(f"Starting Polymarket WS for {len(self.markets)} markets...")
+        self._ws_task = asyncio.create_task(self._connect_ws())
+        # Give it a moment to start
+        await asyncio.sleep(0.1)
 
     async def fetch_market(self, coin: str, timeframe: str) -> Optional[MarketInfo]:
         """Fetch market info for a coin/timeframe"""
@@ -208,18 +246,35 @@ class PolymarketFeed:
                     ping_interval=20,
                     ping_timeout=60,
                     close_timeout=10,
-                    ssl=self._ssl_context
+                    ssl=self._ssl_context,
+                    open_timeout=15  # Timeout for connection
                 ) as ws:
                     self._ws = ws
                     logger.info("Polymarket WS connected")
 
-                    for condition_id in self.markets:
-                        await self.subscribe_market(condition_id)
+                    # Subscribe to all registered markets
+                    subscription_count = 0
+                    for condition_id, market in self.markets.items():
+                        assets = [market.up_token_id, market.down_token_id]
+                        await ws.send(json.dumps({
+                            "assets_ids": assets,
+                            "type": "market"
+                        }))
+                        subscription_count += 1
+
+                    logger.info(f"Subscribed to {subscription_count} markets")
 
                     while self._running:
                         try:
-                            data = json.loads(await ws.recv())
+                            msg = await ws.recv()
+                            if not msg or msg == "[]" or msg.strip() == "":
+                                # Empty message, skip
+                                continue
+                            data = json.loads(msg)
                             await self._handle_message(data)
+                        except json.JSONDecodeError as e:
+                            logger.debug(f"JSON decode error: {e}")
+                            continue
                         except websockets.exceptions.ConnectionClosed:
                             logger.warning("Polymarket WS closed")
                             break
@@ -235,9 +290,31 @@ class PolymarketFeed:
         if isinstance(data, list):
             for entry in data:
                 await self._process_price_update(entry)
-        elif isinstance(data, dict) and data.get("event_type") == "price_change":
-            for change in data.get("price_changes", []):
-                await self._process_price_change(change)
+        elif isinstance(data, dict):
+            event_type = data.get("event_type")
+
+            if event_type == "price_change":
+                for change in data.get("price_changes", []):
+                    await self._process_price_change(change)
+
+            elif event_type == "book":
+                # Order book update
+                asset_id = data.get("asset_id")
+                asks = data.get("asks", [])
+                if asset_id and asks:
+                    # Get best ask (lowest price)
+                    try:
+                        best_ask = min(float(a.get("price", 1)) for a in asks if a.get("price"))
+                        self._update_price(asset_id, best_ask)
+                    except (ValueError, TypeError):
+                        pass
+
+            elif event_type == "last_trade_price":
+                # Last trade price update
+                asset_id = data.get("asset_id")
+                price = data.get("price")
+                if asset_id and price:
+                    self._update_price(asset_id, float(price))
 
     async def _process_price_update(self, data: Dict):
         """Process price update from WS"""
@@ -266,8 +343,10 @@ class PolymarketFeed:
 
         if token_id == price_obj.up_token_id:
             price_obj.up_price = price
+            logger.debug(f"Updated UP price: {price:.4f}")
         elif token_id == price_obj.down_token_id:
             price_obj.down_price = price
+            logger.debug(f"Updated DOWN price: {price:.4f}")
 
     def get_price(self, token_id: str) -> Optional[float]:
         """Get current price for a token"""

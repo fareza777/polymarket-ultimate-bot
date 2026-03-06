@@ -205,7 +205,8 @@ class BinanceFeed:
                     ping_interval=20,
                     ping_timeout=60,
                     close_timeout=10,
-                    ssl=self._ssl_context
+                    ssl=self._ssl_context,
+                    open_timeout=10  # Prevent hanging on geo-blocked connections
                 ) as ws:
                     self._ws = ws
                     self._reconnect_delay = 1
