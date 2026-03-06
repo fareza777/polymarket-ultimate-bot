@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# ═══════════════════════════════════════════════════════════════
+# 
 # POLYMARKET ULTIMATE BOT - MAIN ENTRY POINT
-# ═══════════════════════════════════════════════════════════════
+# 
 
 import asyncio
 import logging
@@ -79,12 +79,12 @@ class PolymarketUltimateBot:
         self._running = False
         self._tasks = []
 
-        logger.info(f"🤖 Polymarket Ultimate Bot initialized")
+        logger.info(f"[BOT] Polymarket Ultimate Bot initialized")
         logger.info(f"   Mode: {'SIMULATION' if self.simulation_mode else 'LIVE'}")
 
     async def start(self):
         """Start the bot"""
-        logger.info("🚀 Starting Polymarket Ultimate Bot...")
+        logger.info("[START] Starting Polymarket Ultimate Bot...")
 
         self._running = True
 
@@ -100,7 +100,7 @@ class PolymarketUltimateBot:
 
     async def stop(self):
         """Stop the bot"""
-        logger.info("🛑 Stopping Polymarket Ultimate Bot...")
+        logger.info("[STOP] Stopping Polymarket Ultimate Bot...")
         self._running = False
 
         # Cancel tasks
@@ -123,7 +123,7 @@ class PolymarketUltimateBot:
 
     async def _init_feeds(self):
         """Initialize data feeds"""
-        logger.info("📡 Initializing data feeds...")
+        logger.info("[FEED] Initializing data feeds...")
 
         # Binance feeds
         for coin in self.config.binance.coins:
@@ -155,11 +155,11 @@ class PolymarketUltimateBot:
         self.sentiment_feed = SentimentFeed()
         await self.sentiment_feed.start()
 
-        logger.info("✅ Data feeds initialized")
+        logger.info("[OK] Data feeds initialized")
 
     async def _init_strategy(self):
         """Initialize strategy"""
-        logger.info("📊 Initializing strategy...")
+        logger.info("[STRATEGY] Initializing strategy...")
 
         self.strategy = CombinedStrategy({
             "signal_weight": self.config.strategy.signal_weight,
@@ -169,11 +169,11 @@ class PolymarketUltimateBot:
             "entry_bearish_threshold": self.config.strategy.entry_bearish_threshold
         })
 
-        logger.info("✅ Strategy initialized")
+        logger.info("[OK] Strategy initialized")
 
     def _init_risk(self):
         """Initialize risk management"""
-        logger.info("🛡️ Initializing risk management...")
+        logger.info("[RISK] Initializing risk management...")
 
         self.risk_manager = RiskManager({
             "base_position_size": self.config.risk.base_position_size,
@@ -189,11 +189,11 @@ class PolymarketUltimateBot:
             "max_hold_time_seconds": self.config.risk.max_hold_time_seconds
         })
 
-        logger.info("✅ Risk management initialized")
+        logger.info("[OK] Risk management initialized")
 
     async def _init_execution(self):
         """Initialize execution"""
-        logger.info("⚡ Initializing execution...")
+        logger.info("[EXEC] Initializing execution...")
 
         if self.simulation_mode:
             self.paper_trader = PaperTrader({
@@ -202,7 +202,7 @@ class PolymarketUltimateBot:
                 "take_profit_pct": self.config.risk.take_profit_pct
             })
             await self.paper_trader.start()
-            logger.info("📝 Paper trading mode enabled")
+            logger.info("[PAPER] Paper trading mode enabled")
         else:
             self.executor = PolymarketExecutor({
                 "api_key": self.config.polymarket.api_key,
@@ -213,13 +213,13 @@ class PolymarketUltimateBot:
                 "simulation_mode": False
             })
             await self.executor.start()
-            logger.info("🔴 LIVE trading mode enabled")
+            logger.info("[LIVE] LIVE trading mode enabled")
 
-        logger.info("✅ Execution initialized")
+        logger.info("[OK] Execution initialized")
 
     async def _init_monitoring(self):
         """Initialize monitoring"""
-        logger.info("📱 Initializing monitoring...")
+        logger.info("[MONITOR] Initializing monitoring...")
 
         # Telegram
         if self.config.telegram.enabled:
@@ -234,11 +234,11 @@ class PolymarketUltimateBot:
         self.dashboard = Dashboard()
         await self.dashboard.start()
 
-        logger.info("✅ Monitoring initialized")
+        logger.info("[OK] Monitoring initialized")
 
     async def _run(self):
         """Main trading loop"""
-        logger.info("🔄 Starting trading loop...")
+        logger.info("[LOOP] Starting trading loop...")
 
         # Start Binance feeds
         feed_tasks = []
@@ -340,7 +340,7 @@ class PolymarketUltimateBot:
 
         shares = position_size / entry_price
 
-        logger.info(f"🎯 TRADE SIGNAL: {coin} {timeframe}")
+        logger.info(f"[SIGNAL] TRADE SIGNAL: {coin} {timeframe}")
         logger.info(f"   Direction: {result.direction} | Score: {result.score:.0f}")
         logger.info(f"   Size: ${position_size:.2f} | Shares: {shares:.2f}")
 

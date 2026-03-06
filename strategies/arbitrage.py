@@ -4,6 +4,7 @@
 # ═══════════════════════════════════════════════════════════════
 
 import logging
+from dataclasses import dataclass
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 
@@ -212,7 +213,3 @@ class ArbitrageStrategy(BaseStrategy):
         if opportunities:
             return opportunities[0].__dict__
         return None
-
-
-# Import dataclass
-from dataclasses import dataclass

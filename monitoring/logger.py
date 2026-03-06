@@ -38,12 +38,18 @@ def setup_logger(
 
     # Console handler
     if rich_console:
-        console = Console(force_terminal=True)
+        # Force UTF-8 encoding for Windows
+        if sys.platform == "win32":
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+
+        console = Console(force_terminal=True, legacy_windows=False)
         handler = RichHandler(
             console=console,
             show_time=True,
             show_path=False,
-            rich_tracebacks=True
+            rich_tracebacks=True,
+            markup=True
         )
         handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter("%(message)s")
