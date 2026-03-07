@@ -160,7 +160,8 @@ class BotWithWebDashboard:
                 # Update dashboard with positions
                 if self.paper_trader:
                     positions = {}
-                    for k, pos in self.paper_trader.open_positions.items():
+                    # Access positions through position_manager
+                    for k, pos in self.paper_trader.position_manager.open_positions.items():
                         positions[k] = {
                             "coin": pos.coin,
                             "timeframe": pos.timeframe,
@@ -171,11 +172,12 @@ class BotWithWebDashboard:
                         }
                     update_positions(positions)
 
-                    # Update PnL
+                    # Update PnL from stats
+                    stats = self.paper_trader.position_manager.get_stats_summary()
                     update_pnl(
                         self.paper_trader.balance,
-                        self.paper_trader.total_trades,
-                        self.paper_trader.win_rate
+                        stats.get("total_trades", 0),
+                        stats.get("win_rate", 0.0)
                     )
 
                 await asyncio.sleep(3)
