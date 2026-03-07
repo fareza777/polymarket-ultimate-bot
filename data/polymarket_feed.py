@@ -335,18 +335,28 @@ class PolymarketFeed:
 
     def _update_price(self, token_id: str, price: float):
         """Update price for a token"""
-        if token_id not in self.prices:
-            return
-
-        price_obj = self.prices[token_id]
-        price_obj.last_update = time.time()
-
-        if token_id == price_obj.up_token_id:
-            price_obj.up_price = price
-            logger.debug(f"Updated UP price: {price:.4f}")
-        elif token_id == price_obj.down_token_id:
-            price_obj.down_price = price
-            logger.debug(f"Updated DOWN price: {price:.4f}")
+        # Find the market that contains this token
+        for condition_id, market in self.markets.items():
+            if token_id == market.up_token_id:
+                # This is the UP token
+                if market.up_token_id in self.prices:
+                    self.prices[market.up_token_id].up_price = price
+                    self.prices[market.up_token_id].last_update = time.time()
+                    logger.debug(f"Updated UP price: {price:.4f}")
+                if market.down_token_id in self.prices:
+                    self.prices[market.down_token_id].up_price = price
+                    self.prices[market.down_token_id].last_update = time.time()
+                return
+            elif token_id == market.down_token_id:
+                # This is the DOWN token
+                if market.up_token_id in self.prices:
+                    self.prices[market.up_token_id].down_price = price
+                    self.prices[market.up_token_id].last_update = time.time()
+                if market.down_token_id in self.prices:
+                    self.prices[market.down_token_id].down_price = price
+                    self.prices[market.down_token_id].last_update = time.time()
+                    logger.debug(f"Updated DOWN price: {price:.4f}")
+                return
 
     def get_price(self, token_id: str) -> Optional[float]:
         """Get current price for a token"""
