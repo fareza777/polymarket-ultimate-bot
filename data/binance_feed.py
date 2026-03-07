@@ -104,7 +104,9 @@ class BinanceFeed:
         self._running = True
         await self._bootstrap_klines()
         asyncio.create_task(self._poll_orderbook())
-        await self._connect_ws()
+        asyncio.create_task(self._connect_ws())  # Run in background
+        # Give WS a moment to connect
+        await asyncio.sleep(0.5)
 
     async def stop(self):
         """Stop the WebSocket feed"""
