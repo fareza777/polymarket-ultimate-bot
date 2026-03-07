@@ -174,27 +174,30 @@ class BotWithWebDashboard:
                     await self._process_market(key)
 
                 # Update dashboard with positions
-                if self.paper_trader:
-                    positions = {}
-                    # Access positions through position_manager
-                    for k, pos in self.paper_trader.position_manager.open_positions.items():
-                        positions[k] = {
-                            "coin": pos.coin,
-                            "timeframe": pos.timeframe,
-                            "direction": str(pos.direction),
-                            "entry_price": pos.entry_price,
-                            "shares": pos.shares,
-                            "pnl": pos.pnl if hasattr(pos, 'pnl') else 0
-                        }
-                    update_positions(positions)
+                if self.paper_trader and hasattr(self.paper_trader, 'position_manager'):
+                    try:
+                        positions = {}
+                        open_pos = getattr(self.paper_trader.position_manager, 'open_positions', {})
+                        for k, pos in open_pos.items():
+                            positions[k] = {
+                                "coin": pos.coin,
+                                "timeframe": pos.timeframe,
+                                "direction": str(pos.direction),
+                                "entry_price": pos.entry_price,
+                                "shares": pos.shares,
+                                "pnl": getattr(pos, 'pnl', 0)
+                            }
+                        update_positions(positions)
 
-                    # Update PnL from stats
-                    stats = self.paper_trader.position_manager.get_stats_summary()
-                    update_pnl(
-                        self.paper_trader.balance,
-                        stats.get("total_trades", 0),
-                        stats.get("win_rate", 0.0)
-                    )
+                        # Update PnL from stats
+                        stats = self.paper_trader.position_manager.get_stats_summary()
+                        update_pnl(
+                            self.paper_trader.balance,
+                            stats.get("total_trades", 0),
+                            stats.get("win_rate", 0.0)
+                        )
+                    except Exception as e:
+                        logger.debug(f"Position update error: {e}")
 
                 await asyncio.sleep(3)
 
