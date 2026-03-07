@@ -147,9 +147,25 @@ class BotWithWebDashboard:
         """Main trading loop"""
         logger.info("Starting trading loop...")
 
-        # Start Binance feeds
+        # Start Binance feeds sequentially with delay to avoid overwhelming connections
+        update_system_status("binance_ws", "connecting")
+        connected_count = 0
         for key, feed in self.binance_feeds.items():
-            asyncio.create_task(self._safe_start_feed(feed, key))
+            try:
+                await asyncio.wait_for(feed.start(), timeout=15)
+                connected_count += 1
+                logger.info(f"Binance {key} connected ({connected_count}/{len(self.binance_feeds)})")
+                await asyncio.sleep(1)  # Delay between connections
+            except asyncio.TimeoutError:
+                logger.warning(f"Feed {key} timed out")
+            except Exception as e:
+                logger.warning(f"Feed {key} error: {e}")
+
+        if connected_count > 0:
+            update_system_status("binance_ws", "connected")
+            logger.info(f"Binance: {connected_count}/{len(self.binance_feeds)} feeds connected")
+        else:
+            update_system_status("binance_ws", "disconnected")
 
         while self.running:
             try:
